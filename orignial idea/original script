@@ -44,8 +44,8 @@
  *   1. Run the MAC-address scanner sketch on the CYD receiver board and
  *      replace cydMacAddress[] below with the real 6-byte address.
  *   2. Adjust RADAR_RX_PIN / RADAR_TX_PIN if wired differently.
- *   3. Replace the dummy parse block in loop() with the actual frame-parsing
- *      algorithm for your specific radar firmware/protocol.
+ *   3. If your radar protocol differs, adjust parseRadarFrame() constants
+ *      (header bytes, payload layout, checksum rule) accordingly.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -117,27 +117,96 @@ void setup() {
 }
 
 // ── Radar frame parser ───────────────────────────────────────────────────────
-// Replace this stub with the real protocol for your radar firmware.
-// Typical 24 GHz modules output binary frames with a header, payload, and
-// checksum.  Parse those bytes into the four outboundData fields.
+// Expected frame (12 bytes total):
+//   [0]  0xAA
+//   [1]  0x55
+//   [2]  payload length (must be 8)
+//   [3]  distance_cm LSB
+//   [4]  distance_cm MSB
+//   [5]  angle_deci_deg LSB (signed int16)
+//   [6]  angle_deci_deg MSB
+//   [7]  speed_cm_s LSB (signed int16)
+//   [8]  speed_cm_s MSB
+//   [9]  energy LSB
+//   [10] energy MSB
+//   [11] checksum = 8-bit sum of bytes [0..10]
 //
 // Returns true when a complete, valid frame has been parsed into outboundData.
 bool parseRadarFrame() {
-    // TODO: implement your radar's protocol here.
-    //
-    // Example approach for a generic binary-framed protocol:
-    //   1. Read bytes into a ring-buffer.
-    //   2. Scan for the start-of-frame magic bytes.
-    //   3. Extract payload fields (little-endian floats / int16 typically).
-    //   4. Validate checksum / length.
-    //   5. Populate outboundData and return true.
-    //
-    // Placeholder values — remove once real parsing is in place:
-    outboundData.distance = 4.2f;   // metres
-    outboundData.angle    = 15.5f;  // degrees
-    outboundData.speed    = 0.4f;   // m/s
-    outboundData.energy   = 45;     // a.u.
-    return true;
+    constexpr uint8_t FRAME_HEADER_0 = 0xAA;
+    constexpr uint8_t FRAME_HEADER_1 = 0x55;
+    constexpr uint8_t PAYLOAD_LENGTH = 8;
+    constexpr size_t FRAME_SIZE = 12;
+    static uint8_t frameBuffer[128];
+    static size_t bufferedBytes = 0;
+
+    while (RadarSerial.available() > 0 && bufferedBytes < sizeof(frameBuffer)) {
+        int incoming = RadarSerial.read();
+        if (incoming >= 0) {
+            frameBuffer[bufferedBytes++] = static_cast<uint8_t>(incoming);
+        }
+    }
+
+    if (bufferedBytes == sizeof(frameBuffer) && RadarSerial.available() > 0) {
+        bufferedBytes = 0;
+    }
+
+    size_t cursor = 0;
+    while ((bufferedBytes - cursor) >= FRAME_SIZE) {
+        if (frameBuffer[cursor] != FRAME_HEADER_0 || frameBuffer[cursor + 1] != FRAME_HEADER_1) {
+            cursor++;
+            continue;
+        }
+
+        if (frameBuffer[cursor + 2] != PAYLOAD_LENGTH) {
+            cursor++;
+            continue;
+        }
+
+        uint8_t checksum = 0;
+        for (size_t i = 0; i < FRAME_SIZE - 1; ++i) {
+            checksum = static_cast<uint8_t>(checksum + frameBuffer[cursor + i]);
+        }
+
+        if (checksum != frameBuffer[cursor + FRAME_SIZE - 1]) {
+            cursor++;
+            continue;
+        }
+
+        const uint16_t distanceCm = static_cast<uint16_t>(
+            frameBuffer[cursor + 3] | (static_cast<uint16_t>(frameBuffer[cursor + 4]) << 8)
+        );
+        const int16_t angleDeciDeg = static_cast<int16_t>(
+            frameBuffer[cursor + 5] | (static_cast<uint16_t>(frameBuffer[cursor + 6]) << 8)
+        );
+        const int16_t speedCmPerSecond = static_cast<int16_t>(
+            frameBuffer[cursor + 7] | (static_cast<uint16_t>(frameBuffer[cursor + 8]) << 8)
+        );
+        const uint16_t energyRaw = static_cast<uint16_t>(
+            frameBuffer[cursor + 9] | (static_cast<uint16_t>(frameBuffer[cursor + 10]) << 8)
+        );
+
+        outboundData.distance = static_cast<float>(distanceCm) / 100.0f;
+        outboundData.angle = static_cast<float>(angleDeciDeg) / 10.0f;
+        outboundData.speed = static_cast<float>(speedCmPerSecond) / 100.0f;
+        outboundData.energy = static_cast<int>(energyRaw);
+
+        const size_t consumedBytes = cursor + FRAME_SIZE;
+        if (consumedBytes < bufferedBytes) {
+            memmove(frameBuffer, frameBuffer + consumedBytes, bufferedBytes - consumedBytes);
+        }
+        bufferedBytes -= consumedBytes;
+        return true;
+    }
+
+    if (cursor > 0 && cursor < bufferedBytes) {
+        memmove(frameBuffer, frameBuffer + cursor, bufferedBytes - cursor);
+        bufferedBytes -= cursor;
+    } else if (cursor >= bufferedBytes) {
+        bufferedBytes = 0;
+    }
+
+    return false;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
