@@ -147,7 +147,7 @@ bool parseRadarFrame() {
         }
     }
 
-    if (bufferedBytes == sizeof(frameBuffer) && RadarSerial.available() > 0) {
+    if (bufferedBytes == sizeof(frameBuffer)) {
         bufferedBytes = 0;
     }
 
@@ -195,7 +195,7 @@ bool parseRadarFrame() {
         if (consumedBytes < bufferedBytes) {
             memmove(frameBuffer, frameBuffer + consumedBytes, bufferedBytes - consumedBytes);
         }
-        bufferedBytes -= consumedBytes;
+        bufferedBytes = (consumedBytes < bufferedBytes) ? (bufferedBytes - consumedBytes) : 0;
         return true;
     }
 
