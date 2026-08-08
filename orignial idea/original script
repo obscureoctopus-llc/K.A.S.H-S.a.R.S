@@ -148,7 +148,9 @@ bool parseRadarFrame() {
     }
 
     if (bufferedBytes == sizeof(frameBuffer)) {
-        bufferedBytes = 0;
+        constexpr size_t KEEP_TAIL_BYTES = FRAME_SIZE - 1;
+        memmove(frameBuffer, frameBuffer + (sizeof(frameBuffer) - KEEP_TAIL_BYTES), KEEP_TAIL_BYTES);
+        bufferedBytes = KEEP_TAIL_BYTES;
     }
 
     size_t cursor = 0;
@@ -177,10 +179,12 @@ bool parseRadarFrame() {
             frameBuffer[cursor + 3] | (static_cast<uint16_t>(frameBuffer[cursor + 4]) << 8)
         );
         const int16_t angleDeciDeg = static_cast<int16_t>(
-            frameBuffer[cursor + 5] | (static_cast<uint16_t>(frameBuffer[cursor + 6]) << 8)
+            static_cast<uint16_t>(frameBuffer[cursor + 5]) |
+            (static_cast<uint16_t>(frameBuffer[cursor + 6]) << 8)
         );
         const int16_t speedCmPerSecond = static_cast<int16_t>(
-            frameBuffer[cursor + 7] | (static_cast<uint16_t>(frameBuffer[cursor + 8]) << 8)
+            static_cast<uint16_t>(frameBuffer[cursor + 7]) |
+            (static_cast<uint16_t>(frameBuffer[cursor + 8]) << 8)
         );
         const uint16_t energyRaw = static_cast<uint16_t>(
             frameBuffer[cursor + 9] | (static_cast<uint16_t>(frameBuffer[cursor + 10]) << 8)
