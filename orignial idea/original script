@@ -137,24 +137,31 @@ bool parseRadarFrame() {
     constexpr uint8_t FRAME_HEADER_1 = 0x55;
     constexpr uint8_t PAYLOAD_LENGTH = 8;
     constexpr size_t FRAME_SIZE = 12;
-    static uint8_t frameBuffer[128];
+    constexpr size_t FRAME_BUFFER_SIZE = 128;
+    static uint8_t frameBuffer[FRAME_BUFFER_SIZE];
     static size_t bufferedBytes = 0;
 
-    while (RadarSerial.available() > 0 && bufferedBytes < sizeof(frameBuffer)) {
+    if (bufferedBytes >= FRAME_BUFFER_SIZE) {
+        constexpr size_t KEEP_TAIL_BYTES = FRAME_SIZE - 1;
+        memmove(frameBuffer, frameBuffer + (FRAME_BUFFER_SIZE - KEEP_TAIL_BYTES), KEEP_TAIL_BYTES);
+        bufferedBytes = KEEP_TAIL_BYTES;
+    }
+
+    while (RadarSerial.available() > 0 && bufferedBytes < FRAME_BUFFER_SIZE) {
         int incoming = RadarSerial.read();
         if (incoming >= 0) {
             frameBuffer[bufferedBytes++] = static_cast<uint8_t>(incoming);
         }
     }
 
-    if (bufferedBytes == sizeof(frameBuffer)) {
+    if (bufferedBytes >= FRAME_BUFFER_SIZE) {
         constexpr size_t KEEP_TAIL_BYTES = FRAME_SIZE - 1;
-        memmove(frameBuffer, frameBuffer + (sizeof(frameBuffer) - KEEP_TAIL_BYTES), KEEP_TAIL_BYTES);
+        memmove(frameBuffer, frameBuffer + (FRAME_BUFFER_SIZE - KEEP_TAIL_BYTES), KEEP_TAIL_BYTES);
         bufferedBytes = KEEP_TAIL_BYTES;
     }
 
     size_t cursor = 0;
-    while ((bufferedBytes - cursor) >= FRAME_SIZE) {
+    while ((cursor + FRAME_SIZE) <= bufferedBytes) {
         if (frameBuffer[cursor] != FRAME_HEADER_0 || frameBuffer[cursor + 1] != FRAME_HEADER_1) {
             cursor++;
             continue;
